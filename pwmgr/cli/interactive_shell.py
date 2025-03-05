@@ -91,12 +91,29 @@ class PasswordManagerShell(cmd.Cmd):
             print("No password entries found.")
             return
 
+        # Sort entries by name
+        sorted_entries = sorted(filtered_entries, key=lambda e: e.name.lower())
+
+        # Calculate column widths for better formatting
+        id_width = 8  # Fixed width for ID (shortened UUID)
+        name_width = max(len("NAME"), max(len(entry.name) for entry in sorted_entries))
+        username_width = max(len("USERNAME"), max(len(entry.username) for entry in sorted_entries))
+
+        # Print header
         print("\nPassword Entries:")
-        print("-" * 50)
-        for entry in sorted(filtered_entries, key=lambda e: e.name.lower()):
-            print(f"- {entry.name} ({entry.username})")
-        print("-" * 50)
-        print(f"Total: {len(filtered_entries)} entries")
+        print("-" * (id_width + name_width + username_width + 10))  # +10 for spacing and borders
+        header_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
+        print(header_format.format("ID", "NAME", "USERNAME"))
+        print("-" * (id_width + name_width + username_width + 10))
+
+        # Print entries
+        row_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
+        for entry in sorted_entries:
+            short_id = entry.id[:6]  # Show only first 6 chars of UUID
+            print(row_format.format(short_id, entry.name, entry.username))
+
+        print("-" * (id_width + name_width + username_width + 10))
+        print(f"Total: {len(sorted_entries)} entries")
 
     def do_show(self, arg):
         """Show details of a specific password entry."""

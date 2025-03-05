@@ -135,12 +135,29 @@ def list(name: Optional[str]):
         click.echo("No password entries found.")
         return
 
+    # Sort entries by name
+    sorted_entries = sorted(entries, key=lambda e: e.name.lower())
+
+    # Calculate column widths for better formatting
+    id_width = 8  # Fixed width for ID (shortened UUID)
+    name_width = max(len("NAME"), max(len(entry.name) for entry in sorted_entries))
+    username_width = max(len("USERNAME"), max(len(entry.username) for entry in sorted_entries))
+
+    # Print header
     click.echo("\nPassword Entries:")
-    click.echo("-" * 50)
-    for entry in sorted(entries, key=lambda e: e.name.lower()):
-        click.echo(f"- {entry.name} ({entry.username})")
-    click.echo("-" * 50)
-    click.echo(f"Total: {len(entries)} entries")
+    click.echo("-" * (id_width + name_width + username_width + 10))  # +10 for spacing and borders
+    header_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
+    click.echo(header_format.format("ID", "NAME", "USERNAME"))
+    click.echo("-" * (id_width + name_width + username_width + 10))
+
+    # Print entries
+    row_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
+    for entry in sorted_entries:
+        short_id = entry.id[:6]  # Show only first 6 chars of UUID
+        click.echo(row_format.format(short_id, entry.name, entry.username))
+
+    click.echo("-" * (id_width + name_width + username_width + 10))
+    click.echo(f"Total: {len(sorted_entries)} entries")
 
 
 @cli.command()
