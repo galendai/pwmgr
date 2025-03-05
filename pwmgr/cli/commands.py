@@ -29,7 +29,7 @@ def get_master_password(confirm: bool = False) -> str:
     if confirm:
         confirm_password = getpass.getpass("Confirm master password: ")
         if password != confirm_password:
-            click.echo("Passwords do not match.")
+            click.secho("Passwords do not match.", fg="red", bold=True)
             sys.exit(1)
     return password
 
@@ -44,11 +44,11 @@ def cli():
 def init():
     """Initialize the password manager."""
     if storage.file_exists():
-        click.echo("Password manager already initialized.")
+        click.secho("Password manager already initialized.", fg="yellow")
         if not click.confirm("Do you want to reset? This will delete all stored passwords!"):
             return
 
-    click.echo("Initializing password manager...")
+    click.secho("Initializing password manager...", fg="blue")
 
     # Prompt for master password
     master_password = get_master_password(confirm=True)
@@ -56,7 +56,7 @@ def init():
     # Initialize the password file
     storage.initialize(master_password)
 
-    click.echo("Password manager initialized successfully.")
+    click.secho("Password manager initialized successfully.", fg="green", bold=True)
 
 
 @cli.command()
@@ -76,12 +76,12 @@ def add(name: str, username: str, password: Optional[str], notes: Optional[str],
     # Load existing entries
     entries = storage.load(master_password)
     if entries is None:
-        click.echo("Invalid master password.")
+        click.secho("Invalid master password.", fg="red", bold=True)
         sys.exit(1)
 
     # Check if entry with this name already exists
     if any(entry.name == name for entry in entries):
-        click.echo(f"Entry with name '{name}' already exists.")
+        click.secho(f"Entry with name '{name}' already exists.", fg="yellow")
         if not click.confirm("Do you want to overwrite?"):
             return
         # Remove existing entry
@@ -93,7 +93,8 @@ def add(name: str, username: str, password: Optional[str], notes: Optional[str],
             length=password_length,
             include_symbols=include_symbols
         )
-        click.echo(f"Generated password: {password}")
+        click.secho("Generated password: ", fg="blue", nl=False)
+        click.secho(password, fg="bright_blue")
     elif not password:
         password = getpass.getpass("Enter password: ")
 
@@ -110,7 +111,7 @@ def add(name: str, username: str, password: Optional[str], notes: Optional[str],
     # Save entries
     storage.save(entries, master_password)
 
-    click.echo(f"Password entry '{name}' added successfully.")
+    click.secho(f"Password entry '{name}' added successfully.", fg="green")
 
 
 @cli.command()
@@ -123,7 +124,7 @@ def list(name: Optional[str]):
     # Load entries
     entries = storage.load(master_password)
     if entries is None:
-        click.echo("Invalid master password.")
+        click.secho("Invalid master password.", fg="red", bold=True)
         sys.exit(1)
 
     # Filter entries if name is provided
@@ -132,7 +133,7 @@ def list(name: Optional[str]):
 
     # Display entries
     if not entries:
-        click.echo("No password entries found.")
+        click.secho("No password entries found.", fg="yellow")
         return
 
     # Sort entries by name
@@ -144,20 +145,22 @@ def list(name: Optional[str]):
     username_width = max(len("USERNAME"), max(len(entry.username) for entry in sorted_entries))
 
     # Print header
-    click.echo("\nPassword Entries:")
-    click.echo("-" * (id_width + name_width + username_width + 10))  # +10 for spacing and borders
+    click.secho("\nPassword Entries:", fg="bright_blue", bold=True)
+    click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
     header_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
-    click.echo(header_format.format("ID", "NAME", "USERNAME"))
-    click.echo("-" * (id_width + name_width + username_width + 10))
+    click.secho(header_format.format("ID", "NAME", "USERNAME"), fg="cyan")
+    click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
 
     # Print entries
     row_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
-    for entry in sorted_entries:
+    for i, entry in enumerate(sorted_entries):
         short_id = entry.id[:6]  # Show only first 6 chars of UUID
-        click.echo(row_format.format(short_id, entry.name, entry.username))
+        # Alternate row colors for better readability
+        color = "bright_white" if i % 2 == 0 else "white"
+        click.secho(row_format.format(short_id, entry.name, entry.username), fg=color)
 
-    click.echo("-" * (id_width + name_width + username_width + 10))
-    click.echo(f"Total: {len(sorted_entries)} entries")
+    click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
+    click.secho(f"Total: {len(sorted_entries)} entries", fg="green")
 
 
 @cli.command()
@@ -171,33 +174,41 @@ def show(name: str, show_password: bool):
     # Load entries
     entries = storage.load(master_password)
     if entries is None:
-        click.echo("Invalid master password.")
+        click.secho("Invalid master password.", fg="red", bold=True)
         sys.exit(1)
 
     # Find entry
     entry = next((e for e in entries if e.name.lower() == name.lower()), None)
     if not entry:
-        click.echo(f"No entry found with name '{name}'.")
+        click.secho(f"No entry found with name '{name}'.", fg="yellow")
         return
 
     # Display entry
-    click.echo("\nPassword Entry Details:")
-    click.echo("-" * 50)
-    click.echo(f"Name: {entry.name}")
-    click.echo(f"Username: {entry.username}")
+    click.secho("\nPassword Entry Details:", fg="bright_blue", bold=True)
+    click.secho("-" * 50, fg="blue")
+    click.secho(f"Name: ", fg="cyan", nl=False)
+    click.secho(entry.name, fg="white")
+    click.secho(f"Username: ", fg="cyan", nl=False)
+    click.secho(entry.username, fg="white")
 
     if show_password:
-        click.echo(f"Password: {entry.password}")
+        click.secho(f"Password: ", fg="cyan", nl=False)
+        click.secho(entry.password, fg="bright_green")
     else:
         hidden_pw = "*" * min(len(entry.password), 10)
-        click.echo(f"Password: {hidden_pw} (use --show-password to reveal)")
+        click.secho(f"Password: ", fg="cyan", nl=False)
+        click.secho(f"{hidden_pw} ", fg="yellow", nl=False)
+        click.secho("(use --show-password to reveal)", fg="bright_black")
 
     if entry.notes:
-        click.echo(f"Notes: {entry.notes}")
+        click.secho(f"Notes: ", fg="cyan", nl=False)
+        click.secho(entry.notes, fg="white")
 
-    click.echo(f"Created: {entry.created_at}")
-    click.echo(f"Updated: {entry.updated_at}")
-    click.echo("-" * 50)
+    click.secho(f"Created: ", fg="cyan", nl=False)
+    click.secho(entry.created_at, fg="bright_black")
+    click.secho(f"Updated: ", fg="cyan", nl=False)
+    click.secho(entry.updated_at, fg="bright_black")
+    click.secho("-" * 50, fg="blue")
 
 
 @cli.command()
@@ -210,16 +221,16 @@ def delete(name: str):
     # Load entries
     entries = storage.load(master_password)
     if entries is None:
-        click.echo("Invalid master password.")
+        click.secho("Invalid master password.", fg="red", bold=True)
         sys.exit(1)
 
     # Check if entry exists
     if not any(entry.name.lower() == name.lower() for entry in entries):
-        click.echo(f"No entry found with name '{name}'.")
+        click.secho(f"No entry found with name '{name}'.", fg="yellow")
         return
 
     # Confirm deletion
-    if not click.confirm(f"Are you sure you want to delete entry '{name}'?"):
+    if not click.confirm(click.style(f"Are you sure you want to delete entry '{name}'?", fg="yellow", bold=True)):
         return
 
     # Remove entry
@@ -228,7 +239,7 @@ def delete(name: str):
     # Save updated entries
     storage.save(entries, master_password)
 
-    click.echo(f"Password entry '{name}' deleted successfully.")
+    click.secho(f"Password entry '{name}' deleted successfully.", fg="green")
 
 
 @cli.command()
@@ -250,9 +261,10 @@ def generate(length: int, include_lowercase: bool, include_uppercase: bool,
             include_symbols=include_symbols
         )
         if count > 1:
-            click.echo(f"{i+1}. {password}")
+            click.secho(f"{i+1}. ", fg="blue", nl=False)
+            click.secho(password, fg="bright_green")
         else:
-            click.echo(password)
+            click.secho(password, fg="bright_green")
 
 
 @cli.command()

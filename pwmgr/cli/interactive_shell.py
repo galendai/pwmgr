@@ -17,7 +17,7 @@ from .commands import cli, get_master_password
 class PasswordManagerShell(cmd.Cmd):
     """Interactive shell for the password manager."""
 
-    intro = """
+    intro = click.style("""
     ██████╗  █████╗ ███████╗███████╗███╗   ███╗ ██████╗ ██████╗
     ██╔══██╗██╔══██╗██╔════╝██╔════╝████╗ ████║██╔════╝ ██╔══██╗
     ██████╔╝███████║███████╗███████╗██╔████╔██║██║  ███╗██████╔╝
@@ -26,10 +26,12 @@ class PasswordManagerShell(cmd.Cmd):
     ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝
 
     Interactive Password Manager Shell
+    """, fg="bright_blue") + click.style("""
     Type 'help' for available commands.
     Type 'exit' to exit.
-    """
-    prompt = "pwmgr> "
+    """, fg="cyan")
+
+    prompt = click.style("pwmgr> ", fg="green", bold=True)
 
     def __init__(self):
         super().__init__()
@@ -41,18 +43,18 @@ class PasswordManagerShell(cmd.Cmd):
     def preloop(self):
         """Ask for master password before starting the loop."""
         if not self.storage.file_exists():
-            print("Password storage not initialized. Please run 'init' first.")
+            click.secho("Password storage not initialized. Please run 'init' first.", fg="yellow")
             return
 
         self.master_password = get_master_password()
         self.entries = self.storage.load(self.master_password)
 
         if self.entries is None:
-            print("Invalid master password.")
+            click.secho("Invalid master password.", fg="red", bold=True)
             self.master_password = None
             return
 
-        print(f"Successfully loaded {len(self.entries)} password entries.")
+        click.secho(f"Successfully loaded {len(self.entries)} password entries.", fg="green")
 
     def emptyline(self):
         """Do nothing on empty line."""
@@ -60,7 +62,7 @@ class PasswordManagerShell(cmd.Cmd):
 
     def do_exit(self, arg):
         """Exit the interactive shell."""
-        print("Goodbye!")
+        click.secho("Goodbye!", fg="bright_blue")
         return True
 
     do_quit = do_exit
@@ -88,7 +90,7 @@ class PasswordManagerShell(cmd.Cmd):
 
         # Display entries
         if not filtered_entries:
-            print("No password entries found.")
+            click.secho("No password entries found.", fg="yellow")
             return
 
         # Sort entries by name
@@ -100,20 +102,22 @@ class PasswordManagerShell(cmd.Cmd):
         username_width = max(len("USERNAME"), max(len(entry.username) for entry in sorted_entries))
 
         # Print header
-        print("\nPassword Entries:")
-        print("-" * (id_width + name_width + username_width + 10))  # +10 for spacing and borders
+        click.secho("\nPassword Entries:", fg="bright_blue", bold=True)
+        click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
         header_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
-        print(header_format.format("ID", "NAME", "USERNAME"))
-        print("-" * (id_width + name_width + username_width + 10))
+        click.secho(header_format.format("ID", "NAME", "USERNAME"), fg="cyan")
+        click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
 
         # Print entries
         row_format = f"| {{:<{id_width}}} | {{:<{name_width}}} | {{:<{username_width}}} |"
-        for entry in sorted_entries:
+        for i, entry in enumerate(sorted_entries):
             short_id = entry.id[:6]  # Show only first 6 chars of UUID
-            print(row_format.format(short_id, entry.name, entry.username))
+            # Alternate row colors for better readability
+            color = "bright_white" if i % 2 == 0 else "white"
+            click.secho(row_format.format(short_id, entry.name, entry.username), fg=color)
 
-        print("-" * (id_width + name_width + username_width + 10))
-        print(f"Total: {len(sorted_entries)} entries")
+        click.secho("-" * (id_width + name_width + username_width + 10), fg="blue")
+        click.secho(f"Total: {len(sorted_entries)} entries", fg="green")
 
     def do_show(self, arg):
         """Show details of a specific password entry."""
@@ -132,33 +136,41 @@ class PasswordManagerShell(cmd.Cmd):
                 show_password = True
 
         if not name:
-            print("Please provide a name with --name.")
+            click.secho("Please provide a name with --name.", fg="yellow")
             return
 
         # Find entry
         entry = next((e for e in self.entries if e.name.lower() == name.lower()), None)
         if not entry:
-            print(f"No entry found with name '{name}'.")
+            click.secho(f"No entry found with name '{name}'.", fg="yellow")
             return
 
         # Display entry
-        print("\nPassword Entry Details:")
-        print("-" * 50)
-        print(f"Name: {entry.name}")
-        print(f"Username: {entry.username}")
+        click.secho("\nPassword Entry Details:", fg="bright_blue", bold=True)
+        click.secho("-" * 50, fg="blue")
+        click.secho(f"Name: ", fg="cyan", nl=False)
+        click.secho(entry.name, fg="white")
+        click.secho(f"Username: ", fg="cyan", nl=False)
+        click.secho(entry.username, fg="white")
 
         if show_password:
-            print(f"Password: {entry.password}")
+            click.secho(f"Password: ", fg="cyan", nl=False)
+            click.secho(entry.password, fg="bright_green")
         else:
             hidden_pw = "*" * min(len(entry.password), 10)
-            print(f"Password: {hidden_pw} (use --show-password to reveal)")
+            click.secho(f"Password: ", fg="cyan", nl=False)
+            click.secho(f"{hidden_pw} ", fg="yellow", nl=False)
+            click.secho("(use --show-password to reveal)", fg="bright_black")
 
         if entry.notes:
-            print(f"Notes: {entry.notes}")
+            click.secho(f"Notes: ", fg="cyan", nl=False)
+            click.secho(entry.notes, fg="white")
 
-        print(f"Created: {entry.created_at}")
-        print(f"Updated: {entry.updated_at}")
-        print("-" * 50)
+        click.secho(f"Created: ", fg="cyan", nl=False)
+        click.secho(entry.created_at, fg="bright_black")
+        click.secho(f"Updated: ", fg="cyan", nl=False)
+        click.secho(entry.updated_at, fg="bright_black")
+        click.secho("-" * 50, fg="blue")
 
     def do_add(self, arg):
         """Add a new password entry."""
@@ -190,30 +202,31 @@ class PasswordManagerShell(cmd.Cmd):
                 try:
                     params['password_length'] = int(args[i + 1])
                 except ValueError:
-                    print(f"Invalid password length: {args[i + 1]}")
+                    click.secho(f"Invalid password length: {args[i + 1]}", fg="red")
                     return
                 i += 2
             elif args[i] in ['--include-symbols']:
                 params['include_symbols'] = True
                 i += 1
             else:
-                print(f"Unknown argument: {args[i]}")
+                click.secho(f"Unknown argument: {args[i]}", fg="red")
                 return
 
         # Check for required params
         if 'name' not in params:
-            print("Name is required. Use --name.")
+            click.secho("Name is required. Use --name.", fg="yellow")
             return
 
         if 'username' not in params:
-            print("Username is required. Use --username.")
+            click.secho("Username is required. Use --username.", fg="yellow")
             return
 
         from ..core.models import PasswordEntry
 
         # Check if entry with this name already exists
         if any(entry.name == params['name'] for entry in self.entries):
-            choice = input(f"Entry with name '{params['name']}' already exists. Overwrite? (y/n): ")
+            click.secho(f"Entry with name '{params['name']}' already exists.", fg="yellow")
+            choice = input(click.style("Overwrite? (y/n): ", fg="yellow"))
             if choice.lower() != 'y':
                 return
             # Remove existing entry
@@ -227,7 +240,8 @@ class PasswordManagerShell(cmd.Cmd):
                 length=length,
                 include_symbols=include_symbols
             )
-            print(f"Generated password: {password}")
+            click.secho("Generated password: ", fg="blue", nl=False)
+            click.secho(password, fg="bright_blue")
         elif 'password' not in params:
             import getpass
             password = getpass.getpass("Enter password: ")
@@ -247,7 +261,7 @@ class PasswordManagerShell(cmd.Cmd):
         # Save entries
         self.storage.save(self.entries, self.master_password)
 
-        print(f"Password entry '{params['name']}' added successfully.")
+        click.secho(f"Password entry '{params['name']}' added successfully.", fg="green")
 
     def do_delete(self, arg):
         """Delete a password entry."""
@@ -264,16 +278,17 @@ class PasswordManagerShell(cmd.Cmd):
                 break
 
         if not name:
-            print("Please provide a name with --name.")
+            click.secho("Please provide a name with --name.", fg="yellow")
             return
 
         # Check if entry exists
         if not any(entry.name.lower() == name.lower() for entry in self.entries):
-            print(f"No entry found with name '{name}'.")
+            click.secho(f"No entry found with name '{name}'.", fg="yellow")
             return
 
         # Confirm deletion
-        confirm = input(f"Are you sure you want to delete entry '{name}'? (y/n): ")
+        click.secho(f"Are you sure you want to delete entry '{name}'? (y/n): ", fg="yellow", nl=False)
+        confirm = input()
         if confirm.lower() != 'y':
             return
 
@@ -283,7 +298,7 @@ class PasswordManagerShell(cmd.Cmd):
         # Save updated entries
         self.storage.save(self.entries, self.master_password)
 
-        print(f"Password entry '{name}' deleted successfully.")
+        click.secho(f"Password entry '{name}' deleted successfully.", fg="green")
 
     def do_generate(self, arg):
         """Generate random password(s)."""
@@ -304,7 +319,7 @@ class PasswordManagerShell(cmd.Cmd):
                 try:
                     params['length'] = int(args[i + 1])
                 except ValueError:
-                    print(f"Invalid length: {args[i + 1]}")
+                    click.secho(f"Invalid length: {args[i + 1]}", fg="red")
                     return
                 i += 2
             elif args[i] == '--no-lowercase':
@@ -323,11 +338,11 @@ class PasswordManagerShell(cmd.Cmd):
                 try:
                     params['count'] = int(args[i + 1])
                 except ValueError:
-                    print(f"Invalid count: {args[i + 1]}")
+                    click.secho(f"Invalid count: {args[i + 1]}", fg="red")
                     return
                 i += 2
             else:
-                print(f"Unknown argument: {args[i]}")
+                click.secho(f"Unknown argument: {args[i]}", fg="red")
                 return
 
         for i in range(params['count']):
@@ -339,9 +354,10 @@ class PasswordManagerShell(cmd.Cmd):
                 include_symbols=params['include_symbols']
             )
             if params['count'] > 1:
-                print(f"{i+1}. {password}")
+                click.secho(f"{i+1}. ", fg="blue", nl=False)
+                click.secho(password, fg="bright_green")
             else:
-                print(password)
+                click.secho(password, fg="bright_green")
 
     def do_help(self, arg):
         """List available commands with help text."""
@@ -349,8 +365,8 @@ class PasswordManagerShell(cmd.Cmd):
             # Get help on specific command
             super().do_help(arg)
         else:
-            print("\nAvailable commands:")
-            print("-" * 50)
+            click.secho("\nAvailable commands:", fg="bright_blue", bold=True)
+            click.secho("-" * 50, fg="blue")
             commands = {
                 'list': 'List all password entries (options: --name)',
                 'show': 'Show password details (options: --name, --show-password)',
@@ -362,14 +378,15 @@ class PasswordManagerShell(cmd.Cmd):
             }
 
             for cmd, desc in commands.items():
-                print(f"{cmd:10} - {desc}")
-            print("-" * 50)
-            print("For more details, type 'help <command>'")
+                click.secho(f"{cmd:10}", fg="cyan", nl=False)
+                click.secho(f" - {desc}", fg="white")
+            click.secho("-" * 50, fg="blue")
+            click.secho("For more details, type 'help <command>'", fg="bright_black")
 
     def _check_authenticated(self):
         """Check if the user is authenticated."""
         if self.master_password is None or self.entries is None:
-            print("Not authenticated. Please restart the shell.")
+            click.secho("Not authenticated. Please restart the shell.", fg="red")
             return False
         return True
 
