@@ -3,15 +3,25 @@ Interactive shell for the password manager.
 Allows using multiple commands with a single master password input.
 """
 import os
+import sys
 import cmd
 import shlex
+import fnmatch
 from typing import Optional, List, Dict, Any
+from difflib import SequenceMatcher
 
 import click
 from click.testing import CliRunner
 
 from ..core import PasswordStorage, PasswordGenerator
 from .commands import cli, get_master_password
+
+# Try to import readline for command history and completion
+try:
+    import readline
+    HAS_READLINE = True
+except ImportError:
+    HAS_READLINE = False
 
 
 class PasswordManagerShell(cmd.Cmd):
@@ -33,12 +43,84 @@ class PasswordManagerShell(cmd.Cmd):
 
     prompt = click.style("pwmgr> ", fg="green", bold=True)
 
+    # Available commands for autocompletion
+    COMMANDS = ['list', 'show', 'add', 'delete', 'generate', 'search', 'backup', 'restore', 'security', 'help', 'exit', 'quit']
+
     def __init__(self):
         super().__init__()
         self.storage = PasswordStorage()
         self.master_password = None
         self.runner = CliRunner()
         self.entries = None
+        self._setup_readline()
+
+    def _setup_readline(self):
+        """Set up readline for command history and completion."""
+        if not HAS_READLINE:
+            return
+
+        # History file
+        history_file = os.path.expanduser("~/.pwmgr/.shell_history")
+        history_dir = os.path.dirname(history_file)
+
+        # Ensure directory exists
+        if not os.path.exists(history_dir):
+            os.makedirs(history_dir, exist_ok=True)
+
+        # Load history if exists
+        if os.path.exists(history_file):
+            try:
+                readline.read_history_file(history_file)
+            except Exception:
+                pass
+
+        # Set history size
+        readline.set_history_length(1000)
+
+        # Save history on exit
+        self._history_file = history_file
+
+        # Enable tab completion
+        readline.set_completer(self._completer)
+        readline.parse_and_bind("tab: complete")
+
+    def _completer(self, text: str, state: int) -> Optional[str]:
+        """
+        Custom completer for tab completion.
+
+        Args:
+            text: Current text being completed
+            state: State index for iteration
+
+        Returns:
+            Next completion or None
+        """
+        # Get the current line buffer
+        line_buffer = readline.get_line_buffer() if HAS_READLINE else ""
+
+        # Parse command and arguments
+        parts = line_buffer.lstrip().split()
+
+        if not parts or len(parts) == 1:
+            # Complete command names
+            matches = [cmd for cmd in self.COMMANDS if cmd.startswith(text)]
+        elif parts[0] in ['show', 'delete']:
+            # Complete entry names for show/delete commands
+            if self.entries:
+                entry_names = [e.name for e in self.entries]
+                matches = [name for name in entry_names if name.lower().startswith(text.lower())]
+            else:
+                matches = []
+        elif parts[0] == 'list':
+            # Complete options for list
+            options = ['--name', '-n', '--json']
+            matches = [opt for opt in options if opt.startswith(text)]
+        else:
+            matches = []
+
+        if state < len(matches):
+            return matches[state]
+        return None
 
     def preloop(self):
         """Ask for master password before starting the loop."""
@@ -56,6 +138,14 @@ class PasswordManagerShell(cmd.Cmd):
 
         click.secho(f"Successfully loaded {len(self.entries)} password entries.", fg="green")
 
+    def postloop(self):
+        """Save command history on exit."""
+        if HAS_READLINE and hasattr(self, '_history_file'):
+            try:
+                readline.write_history_file(self._history_file)
+            except Exception:
+                pass
+
     def emptyline(self):
         """Do nothing on empty line."""
         pass
@@ -66,6 +156,78 @@ class PasswordManagerShell(cmd.Cmd):
         return True
 
     do_quit = do_exit
+
+    def do_search(self, arg):
+        """
+        Search for password entries with fuzzy matching.
+
+        Usage: search <query> [--threshold 0.5]
+
+        Options:
+            --threshold  Minimum similarity threshold (0.0-1.0, default: 0.5)
+        """
+        if not self._check_authenticated():
+            return
+
+        args = shlex.split(arg) if arg else []
+        if not args:
+            click.secho("Please provide a search query.", fg="yellow")
+            return
+
+        query = ""
+        threshold = 0.5
+
+        i = 0
+        while i < len(args):
+            if args[i] == '--threshold' and i + 1 < len(args):
+                try:
+                    threshold = float(args[i + 1])
+                    threshold = max(0.0, min(1.0, threshold))
+                except ValueError:
+                    click.secho("Invalid threshold value.", fg="red")
+                    return
+                i += 2
+            else:
+                query += " " + args[i] if query else args[i]
+                i += 1
+
+        if not query:
+            click.secho("Please provide a search query.", fg="yellow")
+            return
+
+        # Perform fuzzy search
+        results = []
+        for entry in self.entries:
+            # Search in name, username, and notes
+            name_score = SequenceMatcher(None, query.lower(), entry.name.lower()).ratio()
+            username_score = SequenceMatcher(None, query.lower(), entry.username.lower()).ratio()
+            notes_score = 0
+            if entry.notes:
+                notes_score = SequenceMatcher(None, query.lower(), entry.notes.lower()).ratio()
+
+            max_score = max(name_score, username_score, notes_score)
+            if max_score >= threshold:
+                results.append((entry, max_score))
+
+        # Sort by score
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        if not results:
+            click.secho(f"No entries found matching '{query}'.", fg="yellow")
+            return
+
+        click.secho(f"\nSearch Results for '{query}':", fg="bright_blue", bold=True)
+        click.secho("-" * 70, fg="blue")
+
+        for entry, score in results:
+            score_pct = int(score * 100)
+            score_color = "green" if score_pct >= 80 else "yellow" if score_pct >= 60 else "red"
+            click.secho(f"  {entry.name}", fg="white", nl=False)
+            click.secho(f" ({entry.username})", fg="bright_black", nl=False)
+            click.secho(f" [{score_pct}%]", fg=score_color)
+
+        click.secho("-" * 70, fg="blue")
+        click.secho(f"Found {len(results)} matching entries.", fg="green")
 
     def do_list(self, arg):
         """List all password entries or filter by name."""
@@ -127,6 +289,7 @@ class PasswordManagerShell(cmd.Cmd):
         args = shlex.split(arg) if arg else []
         name = None
         show_password = False
+        check_strength = False
 
         # Parse arguments
         for i, a in enumerate(args):
@@ -134,6 +297,8 @@ class PasswordManagerShell(cmd.Cmd):
                 name = args[i + 1]
             elif a in ['-p', '--show-password']:
                 show_password = True
+            elif a == '--check-strength':
+                check_strength = True
 
         if not name:
             click.secho("Please provide a name with --name.", fg="yellow")
@@ -156,6 +321,12 @@ class PasswordManagerShell(cmd.Cmd):
         if show_password:
             click.secho(f"Password: ", fg="cyan", nl=False)
             click.secho(entry.password, fg="bright_green")
+
+            # Show password strength if requested
+            if check_strength:
+                strength, label, suggestions = PasswordGenerator.check_password_strength(entry.password)
+                color = "green" if strength >= 4 else "yellow" if strength >= 3 else "red"
+                click.secho(f"Password strength: {label}", fg=color)
         else:
             hidden_pw = "*" * min(len(entry.password), 10)
             click.secho(f"Password: ", fg="cyan", nl=False)
@@ -236,10 +407,14 @@ class PasswordManagerShell(cmd.Cmd):
         if params.get('auto_generate_password'):
             length = params.get('password_length', 16)
             include_symbols = params.get('include_symbols', True)
-            password = PasswordGenerator.generate(
-                length=length,
-                include_symbols=include_symbols
-            )
+            try:
+                password = PasswordGenerator.generate(
+                    length=length,
+                    include_symbols=include_symbols
+                )
+            except ValueError as e:
+                click.secho(str(e), fg="red")
+                return
             click.secho("Generated password: ", fg="blue", nl=False)
             click.secho(password, fg="bright_blue")
         elif 'password' not in params:
@@ -309,7 +484,8 @@ class PasswordManagerShell(cmd.Cmd):
             'include_uppercase': True,
             'include_digits': True,
             'include_symbols': True,
-            'count': 1
+            'count': 1,
+            'check_strength': False
         }
 
         # Parse arguments
@@ -341,23 +517,117 @@ class PasswordManagerShell(cmd.Cmd):
                     click.secho(f"Invalid count: {args[i + 1]}", fg="red")
                     return
                 i += 2
+            elif args[i] == '--check-strength':
+                params['check_strength'] = True
+                i += 1
             else:
                 click.secho(f"Unknown argument: {args[i]}", fg="red")
                 return
 
         for i in range(params['count']):
-            password = PasswordGenerator.generate(
-                length=params['length'],
-                include_lowercase=params['include_lowercase'],
-                include_uppercase=params['include_uppercase'],
-                include_digits=params['include_digits'],
-                include_symbols=params['include_symbols']
-            )
+            try:
+                password = PasswordGenerator.generate(
+                    length=params['length'],
+                    include_lowercase=params['include_lowercase'],
+                    include_uppercase=params['include_uppercase'],
+                    include_digits=params['include_digits'],
+                    include_symbols=params['include_symbols']
+                )
+            except ValueError as e:
+                click.secho(str(e), fg="red")
+                return
+
             if params['count'] > 1:
                 click.secho(f"{i+1}. ", fg="blue", nl=False)
                 click.secho(password, fg="bright_green")
             else:
                 click.secho(password, fg="bright_green")
+
+            if params['check_strength']:
+                strength, label, suggestions = PasswordGenerator.check_password_strength(password)
+                color = "green" if strength >= 4 else "yellow" if strength >= 3 else "red"
+                click.secho(f"   Strength: {label}", fg=color)
+
+    def do_backup(self, arg):
+        """Create a backup of all entries."""
+        if not self._check_authenticated():
+            return
+
+        from ..core.backup import BackupManager
+        import getpass
+
+        args = shlex.split(arg) if arg else []
+        name = None
+
+        for i, a in enumerate(args):
+            if a in ['-n', '--name'] and i + 1 < len(args):
+                name = args[i + 1]
+
+        backup_manager = BackupManager()
+        try:
+            backup_path = backup_manager.create_backup(self.entries, self.master_password, name=name)
+            click.secho(f"Backup created: {backup_path}", fg="green")
+        except Exception as e:
+            click.secho(f"Backup failed: {str(e)}", fg="red")
+
+    def do_restore(self, arg):
+        """Restore entries from a backup file."""
+        if not self._check_authenticated():
+            return
+
+        from ..core.backup import BackupManager
+
+        args = shlex.split(arg) if arg else []
+        backup_file = None
+        merge = False
+
+        i = 0
+        while i < len(args):
+            if args[i] in ['-f', '--file'] and i + 1 < len(args):
+                backup_file = args[i + 1]
+                i += 2
+            elif args[i] == '--merge':
+                merge = True
+                i += 1
+            else:
+                i += 1
+
+        if not backup_file:
+            click.secho("Please provide a backup file with --file.", fg="yellow")
+            return
+
+        backup_manager = BackupManager()
+        try:
+            restored_entries = backup_manager.restore_backup(backup_file, self.master_password)
+
+            if merge:
+                existing_names = {e.name.lower() for e in self.entries}
+                merged = [e for e in self.entries if e.name.lower() not in {r.name.lower() for r in restored_entries}]
+                merged.extend(restored_entries)
+                self.entries = merged
+            else:
+                self.entries = restored_entries
+
+            self.storage.save(self.entries, self.master_password)
+            click.secho(f"Restored {len(restored_entries)} entries.", fg="green")
+        except Exception as e:
+            click.secho(f"Restore failed: {str(e)}", fg="red")
+
+    def do_security(self, arg):
+        """Check security status."""
+        warnings = self.storage.get_security_warnings()
+
+        click.secho("\nSecurity Status:", fg="bright_blue", bold=True)
+        click.secho("-" * 50, fg="blue")
+
+        if warnings:
+            click.secho("Warnings:", fg="yellow")
+            for warning in warnings:
+                click.secho(f"  - {warning}", fg="yellow")
+        else:
+            click.secho("No security warnings.", fg="green")
+
+        click.secho("-" * 50, fg="blue")
 
     def do_help(self, arg):
         """List available commands with help text."""
@@ -366,22 +636,39 @@ class PasswordManagerShell(cmd.Cmd):
             super().do_help(arg)
         else:
             click.secho("\nAvailable commands:", fg="bright_blue", bold=True)
-            click.secho("-" * 50, fg="blue")
+            click.secho("-" * 60, fg="blue")
             commands = {
                 'list': 'List all password entries (options: --name)',
-                'show': 'Show password details (options: --name, --show-password)',
+                'show': 'Show password details (options: --name, --show-password, --check-strength)',
                 'add': 'Add a new password (options: --name, --username, --password, --notes, --auto-generate-password)',
                 'delete': 'Delete a password (options: --name)',
-                'generate': 'Generate random password (options: --length, --count, --no-lowercase, --no-uppercase, etc)',
+                'search': 'Search entries with fuzzy matching (options: --threshold)',
+                'generate': 'Generate random password (options: --length, --count, --check-strength)',
+                'backup': 'Create a backup (options: --name)',
+                'restore': 'Restore from backup (options: --file, --merge)',
+                'security': 'Check security status',
                 'exit': 'Exit the interactive shell',
                 'help': 'Show this help message',
             }
 
-            for cmd, desc in commands.items():
-                click.secho(f"{cmd:10}", fg="cyan", nl=False)
+            for cmd_name, desc in commands.items():
+                click.secho(f"{cmd_name:10}", fg="cyan", nl=False)
                 click.secho(f" - {desc}", fg="white")
-            click.secho("-" * 50, fg="blue")
+            click.secho("-" * 60, fg="blue")
+            click.secho("Tip: Use Tab for command and entry name completion.", fg="bright_black")
             click.secho("For more details, type 'help <command>'", fg="bright_black")
+
+    def complete_show(self, text, line, begidx, endidx):
+        """Complete entry names for show command."""
+        if not self.entries:
+            return []
+        return [e.name for e in self.entries if e.name.lower().startswith(text.lower())]
+
+    def complete_delete(self, text, line, begidx, endidx):
+        """Complete entry names for delete command."""
+        if not self.entries:
+            return []
+        return [e.name for e in self.entries if e.name.lower().startswith(text.lower())]
 
     def _check_authenticated(self):
         """Check if the user is authenticated."""
